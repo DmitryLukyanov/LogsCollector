@@ -1,0 +1,1 @@
+﻿vector vrl --input .\vrl_source_input.json
