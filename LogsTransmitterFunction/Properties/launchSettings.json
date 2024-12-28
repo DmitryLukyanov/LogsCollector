@@ -2,7 +2,7 @@
   "profiles": {
     "LogsTransmitterFunction": {
       "commandName": "Project",
-      "commandLineArgs": "--port 7245",
+      "commandLineArgs": "--port 7245 --verbose",
       "launchBrowser": false
     }
   }

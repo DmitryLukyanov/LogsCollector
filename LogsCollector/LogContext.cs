@@ -3,6 +3,7 @@ using Cake.Core.IO;
 using Cake.Core;
 using Cake.Frosting;
 using System.Diagnostics;
+using Cake.Common.IO;
 
 namespace LogsCollector
 {
@@ -24,6 +25,7 @@ namespace LogsCollector
                 {
                     // TODO: think about switching file name each hour instead of each run?
                     Trace.AutoFlush = true;
+                    _ = Directory.CreateDirectory(__outputFile.GetDirectory().FullPath);
                     Trace.Listeners.Add(
                         new TextWriterTraceListener(
                             File.CreateText(__outputFile.FullPath)));

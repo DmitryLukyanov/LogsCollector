@@ -14,11 +14,4 @@
     <PackageReference Include="Cake.Powershell" Version="4.0.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="data\" />
-    <Folder Include="output\" />
-  </ItemGroup>
-
-  <ProjectExtensions><VisualStudio><UserProperties /></VisualStudio></ProjectExtensions>
-
 </Project>

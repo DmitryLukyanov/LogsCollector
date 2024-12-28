@@ -29,6 +29,12 @@ CSharpDriver.sln.GhostDoc.xml
 *.userprefs
 test-results
 
+# output logs
+LogsCollector/LogsCollector/output/*
+
+# Test related files
+run_*
+
 # NUnit artifacts
 TestResult.xml
 

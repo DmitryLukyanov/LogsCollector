@@ -17,6 +17,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "functions", "functions", "{
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LogsTransmitterFunction", "LogsTransmitterFunction\LogsTransmitterFunction.csproj", "{3853FBB5-0561-48BF-9B76-74FFDDD671A0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LogsCollector.Tests", "LogsCollector.Tests\LogsCollector.Tests.csproj", "{9BC4065A-7330-49DA-9DA9-B70466FA2E87}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -31,6 +33,10 @@ Global
 		{3853FBB5-0561-48BF-9B76-74FFDDD671A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3853FBB5-0561-48BF-9B76-74FFDDD671A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3853FBB5-0561-48BF-9B76-74FFDDD671A0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9BC4065A-7330-49DA-9DA9-B70466FA2E87}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9BC4065A-7330-49DA-9DA9-B70466FA2E87}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9BC4065A-7330-49DA-9DA9-B70466FA2E87}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9BC4065A-7330-49DA-9DA9-B70466FA2E87}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

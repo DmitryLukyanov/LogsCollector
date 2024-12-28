@@ -33,7 +33,7 @@ namespace LogsTransmitterFunction
             public bool ExpectedSchema;
         }
 
-        private record LogLine
+        public record LogLine
         {
             [JsonProperty("file")]
             public string File;

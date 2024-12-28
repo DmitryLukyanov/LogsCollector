@@ -4,13 +4,14 @@ if ($LASTEXITCODE -ne 0) {
     exit 0
 }
 
-# require-healthy: Exit on startup if any sinks fail healthchecks
+If (!(test-path .\data)) {
+    Write-Host 'Creating a data folder..'
+    New-Item -ItemType Directory -Path .\data
+}
 
-# glob_minimum_cooldown_ms
-# The delay between file discovery calls.
-# This controls the interval at which files are searched. 
-# A higher value results in greater chances of some short-lived files being missed between searches, 
-# but a lower value increases the performance impact of file discovery.
+Write-Host 'Starting flow..'
+
+# require-healthy: Exit on startup if any sinks fail healthchecks
 
 vector `
     -c .\config\vector.yaml `

@@ -12,8 +12,7 @@ data_dir: ./data
 sources:
   fileIn:
     type: "file"
-    # 300000 ms => 5 min
-    glob_minimum_cooldown_ms: 300000
+    glob_minimum_cooldown_ms: 1000
     include: 
       - ./logs/*.log
     # Start reading from the current end of the file.
