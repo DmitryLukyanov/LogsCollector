@@ -32,7 +32,7 @@ namespace LogsCollector.Tests
 
         private readonly Process _azureFunctionProcess;
         private readonly int _port;
-        private ConcurrentQueue<string> _stdError;
+        private readonly ConcurrentQueue<string> _stdError;
         private readonly ITestOutputHelper _testOutputHelper;
         private readonly string _testRunConfig;
         private readonly string _testRunDirectory;
@@ -76,7 +76,7 @@ namespace LogsCollector.Tests
         {
             _azureFunctionProcess?.Close();
             _azureFunctionProcess?.Dispose();
-            if (_stdError != null)
+            if (_stdError != null && !_stdError.IsEmpty)
             {
                 // TODO: merge below checks
 
@@ -106,7 +106,7 @@ namespace LogsCollector.Tests
                 workingDirectory: _testRunDirectory,
                 errorStdOutput: _stdError,
                 out var output,
-                out var error);
+                out _);
 
             AssertStream.AssertOutput(output!, "Validated", timeout: TimeSpan.FromSeconds(10));
         }
@@ -114,7 +114,8 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_logs_are_read_from_file_created_beforehand()
         {
-            var values = new[] {
+            var values = new[] 
+            {
                 "1_" + Guid.NewGuid(),
                 "2_" + Guid.NewGuid(),
                 "3_" + Guid.NewGuid(),
@@ -149,9 +150,7 @@ namespace LogsCollector.Tests
                 str => Parser.IsLineValid(str, () => $"{values[3]}\r"),
                 str => Parser.IsLineValid(str, () => $"{values[4]}\r"));
 
-            // Only one usage of each socket address
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: 1);
-
             Cosmos.ValidateRecods(values);
         }
 
@@ -223,7 +222,6 @@ namespace LogsCollector.Tests
 
             // Only one usage of each socket address
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: 1);
-
             Cosmos.ValidateRecods(values);
         }
 
@@ -278,7 +276,6 @@ namespace LogsCollector.Tests
                 "200 OK",
                 TimeSpan.FromSeconds(10), 
                 expectedCount: 2); // the first batch will consist of items [0, 1], the second => [2]
-
             Cosmos.ValidateRecods(values);
         }
 

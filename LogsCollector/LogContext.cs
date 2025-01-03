@@ -3,13 +3,12 @@ using Cake.Core.IO;
 using Cake.Core;
 using Cake.Frosting;
 using System.Diagnostics;
-using Cake.Common.IO;
 
 namespace LogsCollector
 {
     public sealed class LogContext(ICakeContext context) : FrostingContext(context)
     {
-        private static DirectoryPath __root = new DirectoryPath(System.IO.Directory.GetCurrentDirectory())
+        private static readonly DirectoryPath __root = new DirectoryPath(System.IO.Directory.GetCurrentDirectory())
             .GetParent()
             .GetParent()
             .GetParent();

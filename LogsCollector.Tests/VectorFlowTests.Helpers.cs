@@ -99,14 +99,11 @@ namespace LogsCollector.Tests
             {
                 ArgumentNullException.ThrowIfNull(newValues, paramName: nameof(newValues));
                 var configFileLines = new LinkedList<string>(File.ReadAllLines(path));
-                var sourcesNode = FindLinkedListNode(configFileLines, (str) => str.Contains(filter)); // the source name
-                if (sourcesNode == null)
-                {
-                    throw new InvalidOperationException("The 'sources:' node has not been found in config file.");
-                }
+                var node = FindLinkedListNode(configFileLines, (str) => str.Contains(filter)) 
+                    ?? throw new InvalidOperationException($"The '{filter}:' node has not been found in config file."); // the source name
                 foreach (var newValue in newValues)
                 {
-                    sourcesNode = configFileLines.AddAfter(sourcesNode, newValue);
+                    node = configFileLines.AddAfter(node, newValue);
                 }
 
                 File.WriteAllLines(path, configFileLines);
@@ -167,7 +164,7 @@ namespace LogsCollector.Tests
                 ConcurrentQueue<string> errorStdOutput,
                 TimeSpan? timeout = null)
             {
-                var process = RunPs1Script(arguments, workingDirectory, errorStdOutput, out var output, out var error, timeout: timeout);
+                var process = RunPs1Script(arguments, workingDirectory, errorStdOutput, out var output, out _);
                 if (waitUntil != null)
                 {
                     AssertStream.AssertOutput(output!, waitUntil, timeout: timeout ?? TimeSpan.FromSeconds(30));
@@ -181,14 +178,15 @@ namespace LogsCollector.Tests
                 ConcurrentQueue<string> errorStdOutput,
                 out ConcurrentQueue<string>? output,
                 out ConcurrentQueue<string>? error,
-                bool inWindow = false,
-                TimeSpan? timeout = null)
+                bool inWindow = false)
             {
                 output = null;
                 error = null;
-                var processStartInfo = new ProcessStartInfo();
-                processStartInfo.FileName = "powershell.exe";
-                processStartInfo.Arguments = arguments;
+                var processStartInfo = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = arguments
+                };
                 if (inWindow)
                 {
                     processStartInfo.UseShellExecute = true;
@@ -203,8 +201,10 @@ namespace LogsCollector.Tests
                 }
                 processStartInfo.WorkingDirectory = workingDirectory;
 
-                var process = new Process();
-                process.StartInfo = processStartInfo;
+                var process = new Process
+                {
+                    StartInfo = processStartInfo
+                };
                 ConcurrentQueue<string> innerOutput = new();
                 ConcurrentQueue<string> innerError = new();
                 if (!inWindow)
@@ -300,7 +300,7 @@ namespace LogsCollector.Tests
                                     }
                                 })
                                 .ToArray()
-                            ).Any(),
+                            ).Length > 0,
                         timeout))
                     {
                         if (!throwIfFound)
@@ -310,7 +310,7 @@ namespace LogsCollector.Tests
                     }
 
                     // TODO: merge these 2 Assert.Fails
-                    if (throwIfFound && foundMessages != null && foundMessages.Any())
+                    if (throwIfFound && foundMessages != null && foundMessages.Length > 0)
                     {
                         Assert.Fail($"WARNING: The warning output message ({string.Join(",", foundMessages)}) has been detected.");
                     }
