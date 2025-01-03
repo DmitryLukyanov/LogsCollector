@@ -14,7 +14,7 @@ sources:
     type: "file"
     glob_minimum_cooldown_ms: 1000
     include: 
-      - ./logs/*.log
+      - ${FILE_SOURCE_PATH}
     # Start reading from the current end of the file.
     # read_from: end
 
@@ -52,13 +52,10 @@ sinks:
     method: post
     inputs:
       - "msg_parser"
-    # TODO: investigate whether this uri can be configured during launching
-    uri: http://localhost:7245/api/LogsTransmitter
-
+    uri: ${HTTP_SINK_URI}
     # tls certificate should be configured for production case
     tls:
       verify_certificate: false
-
     encoding:
       codec: "json"
 
@@ -76,6 +73,6 @@ sinks:
       # # Only one request can be outstanding at any given time.
       # concurrency: none
 
-    # add if needed later
+    # # add if needed later
     #   headers:
     #     Source: "some_value"

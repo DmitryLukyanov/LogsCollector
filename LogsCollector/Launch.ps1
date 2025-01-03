@@ -1,3 +1,6 @@
+$env:FILE_SOURCE_PATH="./logs/*.log"
+$env:HTTP_SINK_URI="http://localhost:7245/api/LogsTransmitter"
+
 vector validate --no-environment --config-yaml .\config\vector.yaml
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Config validation has been failed with code: $LASTEXITCODE"

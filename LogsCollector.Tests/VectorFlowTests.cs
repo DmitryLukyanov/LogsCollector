@@ -45,7 +45,7 @@ namespace LogsCollector.Tests
             _testOutputHelper = testOutputHelper;
             _stdError = new();
             Powershell.EnsureVectorIsAvailable(_stdError);
-            Cosmos.DropCollection(); // clear test db
+            Cosmos.PrepareCosmos(); // clear test db
 
             _port = 7245;
             _azureFunctionProcess = Powershell.SpawnFunction(_stdError, _port);
@@ -220,7 +220,6 @@ namespace LogsCollector.Tests
                 str => Parser.IsLineValid(str, () => $"{values[1]}"),
                 str => Parser.IsLineValid(str, () => $"{values[2]}"));
 
-            // Only one usage of each socket address
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: 1);
             Cosmos.ValidateRecods(values);
         }

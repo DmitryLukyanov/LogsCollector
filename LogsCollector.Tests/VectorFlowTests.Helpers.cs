@@ -11,13 +11,14 @@ namespace LogsCollector.Tests
     {
         public static class Cosmos
         {
-            public static void DropCollection()
+            private const string CosmosDbConnectionString = "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==";
+            private const string DbName = "LogDb";
+            private const string ContainerName = "CollectedLogs";
+
+            public static void PrepareCosmos()
             {
-                const string cosmosDbConnectionString = "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==";
-                const string dbName = "LogDb";
-                const string containerName = "CollectedLogs";
-                using var client = new CosmosClient(connectionString: cosmosDbConnectionString);
-                var container = client.GetContainer(dbName, containerName);
+                using var client = new CosmosClient(connectionString: CosmosDbConnectionString);
+                var container = client.GetContainer(DbName, ContainerName);
                 try
                 {
                     container.DeleteContainerAsync().GetAwaiter().GetResult();
@@ -26,16 +27,17 @@ namespace LogsCollector.Tests
                 {
                     // ignore
                 }
+                catch (System.Net.Http.HttpRequestException)
+                {
+                    // cosmosdb is not accessible
+                    throw;
+                }
             }
 
             private static void ValidateRecods(Action<IEnumerable<string>> validateMessagesFunc)
             {
-                const string cosmosDbConnectionString = "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==";
-
-                const string dbName = "LogDb";
-                const string containerName = "CollectedLogs";
-                using var client = new CosmosClient(connectionString: cosmosDbConnectionString);
-                var container = client.GetContainer(dbName, containerName);
+                using var client = new CosmosClient(connectionString: CosmosDbConnectionString);
+                var container = client.GetContainer(DbName, ContainerName);
                 var querable = container.GetItemLinqQueryable<LogBatch>(allowSynchronousQueryExecution: true).ToList();
                 var messages = (querable.SelectMany(i => i.Logs)!.Cast<Newtonsoft.Json.Linq.JObject>().ToList()).Select(i => i.GetValue("message")!.ToString());
                 validateMessagesFunc(messages);
