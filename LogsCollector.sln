@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LogsTransmitterFunction", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LogsCollector.Tests", "LogsCollector.Tests\LogsCollector.Tests.csproj", "{9BC4065A-7330-49DA-9DA9-B70466FA2E87}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LogsSourceFunction", "LogsSourceFunction\LogsSourceFunction.csproj", "{FD465496-80CB-4842-8501-F9860F1DFF61}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -37,11 +39,16 @@ Global
 		{9BC4065A-7330-49DA-9DA9-B70466FA2E87}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9BC4065A-7330-49DA-9DA9-B70466FA2E87}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9BC4065A-7330-49DA-9DA9-B70466FA2E87}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FD465496-80CB-4842-8501-F9860F1DFF61}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD465496-80CB-4842-8501-F9860F1DFF61}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD465496-80CB-4842-8501-F9860F1DFF61}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD465496-80CB-4842-8501-F9860F1DFF61}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{3853FBB5-0561-48BF-9B76-74FFDDD671A0} = {E488EFD1-9F1C-42FD-8016-A56DC765BFD0}
+		{FD465496-80CB-4842-8501-F9860F1DFF61} = {E488EFD1-9F1C-42FD-8016-A56DC765BFD0}
 	EndGlobalSection
 EndGlobal

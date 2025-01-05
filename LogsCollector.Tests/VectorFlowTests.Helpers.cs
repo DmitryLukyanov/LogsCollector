@@ -97,6 +97,8 @@ namespace LogsCollector.Tests
                 return newFile;
             }
 
+            public static void RenameFile(string originalFullPath, string newFullPath) => File.Copy(originalFullPath, newFullPath, overwrite: true);
+
             public static void UpdateConfig(string path, string filter, params string[] newValues)
             {
                 ArgumentNullException.ThrowIfNull(newValues, paramName: nameof(newValues));
@@ -259,12 +261,12 @@ namespace LogsCollector.Tests
                     waitUntil: "vector 0."!)) { /* ensure vector is available on the machine */ }
             }
 
-            public static Process SpawnFunction(ConcurrentQueue<string> errorStdOutput, int port) =>
+            public static Process SpawnFunction(string source, ConcurrentQueue<string> errorStdOutput, int port, string waitUntil) =>
                 RunPs1Script(
                     arguments: @$"-Command ""func host start --port {port} --debug""",
-                    workingDirectory: __originalAzureFunctionProjectDirectory,
+                    workingDirectory: source,
                     errorStdOutput: errorStdOutput,
-                    waitUntil: "LogsTransmitter: [POST]");
+                    waitUntil: waitUntil);
         }
 
         public static class AssertStream

@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "LogsSourceFunction": {
+      "commandName": "Project",
+      "commandLineArgs": "--port 7175 --verbose",
+      "launchBrowser": false
+    }
+  }
+}

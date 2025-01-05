@@ -18,6 +18,11 @@ namespace LogsCollector.Tests
                 __testDirectory,
                 "..",
                 "LogsTransmitterFunction"));
+        private static readonly string __originalAzureFunctionHttpSourceProjectDirectory = Path.GetFullPath(
+            Path.Combine(
+                __testDirectory,
+                "..",
+                "LogsSourceFunction"));
         private static readonly string __originalProjectDirectory = Path.GetFullPath(
             Path.Combine(
                 __testDirectory,
@@ -27,6 +32,10 @@ namespace LogsCollector.Tests
             Path.Combine(
                 __originalProjectDirectory,
                 "config"));
+        private static readonly string __originalConfigWithHttpSource = Path.GetFullPath(
+            Path.Combine(
+                __originalConfigDirectory,
+                "vector_with_http_source.yaml"));
         private static readonly string __originalLaunchPs1Path = Path.Combine(__originalProjectDirectory, "Launch.ps1");
         #endregion
 
@@ -48,7 +57,7 @@ namespace LogsCollector.Tests
             Cosmos.PrepareCosmos(); // clear test db
 
             _port = 7245;
-            _azureFunctionProcess = Powershell.SpawnFunction(_stdError, _port);
+            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, _port, waitUntil: "LogsTransmitter: [POST]");
 
             /* 
              * sometimes this process is not killed since previous run and this leads to this error:
@@ -114,7 +123,7 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_logs_are_read_from_file_created_beforehand()
         {
-            var values = new[] 
+            var values = new[]
             {
                 "1_" + Guid.NewGuid(),
                 "2_" + Guid.NewGuid(),
@@ -273,7 +282,7 @@ namespace LogsCollector.Tests
             AssertStream.AssertOutput(
                 error!,
                 "200 OK",
-                TimeSpan.FromSeconds(10), 
+                TimeSpan.FromSeconds(10),
                 expectedCount: 2); // the first batch will consist of items [0, 1], the second => [2]
             Cosmos.ValidateRecods(values);
         }
@@ -301,7 +310,8 @@ namespace LogsCollector.Tests
                     reset.WaitOne();
                 }
                 confirmation.Set(); // release waiting in last iteration
-            }, cancellationTokenSource.Token);
+            },
+            cancellationTokenSource.Token);
             confirmation.WaitOne(); // first iteration
 
             using var process = Powershell.RunPs1Script(
@@ -345,6 +355,7 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_logs_are_read_when_updating_last_record()
         {
+            using var cancellationTokenSource = new CancellationTokenSource();
             using (var stream = File.Create(_testRunRawLog)) { /* close handle */ }
 
             var values = new int[][] { [1, 2, 3], [4], [5, 6] }
@@ -352,9 +363,8 @@ namespace LogsCollector.Tests
                 .ToArray(); /* also represents expected output */
             var reset = new AutoResetEvent(false);
             var confirmation = new AutoResetEvent(false);
-            var task = Task.Factory.StartNew(async () =>
+            var task = Task.Factory.StartNew(() =>
             {
-                await Task.Yield();
                 foreach (var attempt in values)
                 {
                     var duration = Stopwatch.StartNew();
@@ -365,7 +375,8 @@ namespace LogsCollector.Tests
                     reset.WaitOne();
                 }
                 confirmation.Set(); // release waiting in last iteration
-            });
+            },
+            cancellationTokenSource.Token);
             confirmation.WaitOne(); // first iteration
 
             using var process = Powershell.RunPs1Script(
@@ -400,6 +411,40 @@ namespace LogsCollector.Tests
                 reset.Set(); // init next iteration
                 confirmation.WaitOne(); // next iteration is ready
             }
+
+            cancellationTokenSource.Cancel();
+        }
+
+        [Fact]
+        public void Ensure_logs_are_read_from_file_and_http_sources()
+        {
+            var functionPortWithHttpSource = 7175;
+            using var httpSourceFunctionProcess = Powershell.SpawnFunction(
+                __originalAzureFunctionHttpSourceProjectDirectory, 
+                _stdError, 
+                functionPortWithHttpSource,
+                "LogsSource: [GET]");
+
+            FileSystem.RenameFile(__originalConfigWithHttpSource, _testRunConfig);
+
+            using var process = Powershell.RunPs1Script(
+                @$"-ExecutionPolicy Bypass -File ""{_testRunLaunchPs1}""",
+                workingDirectory: _testRunDirectory,
+                errorStdOutput: _stdError,
+                out var output,
+                out var error,
+                inWindow: false);
+
+            AssertStream.AssertOutput(
+                output!,
+                timeout: TimeSpan.FromSeconds(30),
+                logTag: "mainAssert",
+                expectedCount: 2,
+                throwIfFound: false,
+                _testOutputHelper,
+                str => str.Contains("HttpSource_value:"));
+
+            AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: null);
         }
     }
 }
