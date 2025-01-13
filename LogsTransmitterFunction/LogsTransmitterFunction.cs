@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using System;
 using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace LogsTransmitterFunction
 {
@@ -47,6 +48,30 @@ namespace LogsTransmitterFunction
             public DateTime Timestamp;
         }
 
+        public record ParsedMessage
+        {
+            [JsonProperty("engagement_id")]
+            public string EngagementId;
+            [JsonProperty("title")]
+            public string Title;
+            [JsonProperty("severity")]
+            public string Severity;
+            [JsonProperty("stack_trace")]
+            public string StackTrace;
+            [JsonProperty("full_message")]
+            public string FullMessage;
+            [JsonProperty("file")]
+            public string File;
+            [JsonProperty("host")]
+            public string Host;
+            [JsonProperty("source_type")]
+            public string SourceType;
+            [JsonProperty("timestamp")]
+            public DateTime Timestamp;
+            [JsonProperty("expected_message_schema")]
+            public bool ExpectedMessage => Title != null || EngagementId != null || Severity != null || StackTrace != null;
+        }
+
         [FunctionName("LogsTransmitter")]
         public static async Task<IActionResult> Run(
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
@@ -75,7 +100,9 @@ namespace LogsTransmitterFunction
                     try
                     {
                         var lines = JsonConvert.DeserializeObject<LogLine[]>(line);
-                        batch.Logs.AddRange(lines);
+                        var parsedLines = lines.Select(ParseMessage).ToList();
+
+                        batch.Logs.AddRange(parsedLines);
                         batch.ExpectedSchema = true;
                     }
                     catch
@@ -95,6 +122,58 @@ namespace LogsTransmitterFunction
                 log.LogError(new EventId(), ex, ex.Message);
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Let it be public for now
+        /// </summary>
+        public static ParsedMessage ParseMessage(LogLine logLine)
+        {
+            const string EngagementIdToken = "Engagement Id:";
+            const string TitleToken = "Title :";
+            const string SeverityToken = "Severity ::";
+            const string StackTraceToken = "StackTrace ::";
+            var message = logLine.Message;
+
+            int engagementIndex, titleIndex, severityIndex, stackTraceIndex;
+            if (
+                ((engagementIndex = message.IndexOf(EngagementIdToken, StringComparison.OrdinalIgnoreCase)) == -1) ||
+                ((titleIndex = message.IndexOf(TitleToken, StringComparison.OrdinalIgnoreCase)) == -1) ||
+                ((severityIndex = message.IndexOf(SeverityToken, StringComparison.OrdinalIgnoreCase)) == -1) ||
+                ((stackTraceIndex = message.IndexOf(StackTraceToken, StringComparison.OrdinalIgnoreCase)) == 1) ||
+                (engagementIndex != 0 || titleIndex <= engagementIndex || severityIndex <= titleIndex || stackTraceIndex <= severityIndex)
+                )
+            {
+                // the message structure has not been recognized
+                return new ParsedMessage 
+                { 
+                    FullMessage = message, 
+                    File = logLine.File, 
+                    Timestamp = logLine.Timestamp, 
+                    Host = logLine.Host,
+                    SourceType = logLine.SourceType,
+                };
+            }
+
+            // TODO: regex instead?
+            var engagementId = message.Substring(0, titleIndex).Replace(EngagementIdToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
+            var title = message.Substring(titleIndex, severityIndex - titleIndex).Replace(TitleToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
+            var severity = message.Substring(severityIndex, stackTraceIndex - severityIndex).Replace(SeverityToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
+            var stackTrace = message.Substring(stackTraceIndex, message.Length - stackTraceIndex).Replace(StackTraceToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
+
+            return new ParsedMessage 
+            {
+                EngagementId = engagementId, 
+                Title = title, 
+                StackTrace = stackTrace, 
+                Severity = severity,
+                FullMessage = message,
+
+                File = logLine.File,
+                Timestamp = logLine.Timestamp,
+                Host = logLine.Host,
+                SourceType = logLine.SourceType,
+            };
         }
     }
 }
