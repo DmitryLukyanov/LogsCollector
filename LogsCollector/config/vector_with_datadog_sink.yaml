@@ -1,0 +1,58 @@
+api:
+  enabled: true
+ 
+# Controls if sources will wait for destination sinks to deliver the events,
+# or persist them to a disk buffer, before acknowledging receipt.
+# If set to true, all capable sources will have acknowledgements enabled.
+acknowledgements:
+  enabled: true
+ 
+data_dir: ./data
+ 
+sources:
+ 
+  fileIn:
+    type: "file"
+    glob_minimum_cooldown_ms: 1000
+    include: 
+      - ${FILE_SOURCE_PATH}
+    # Start reading from the current end of the file.
+    # read_from: end
+ 
+    # Whether or not to include the "file" tag on the component's corresponding internal metrics.
+    # This is useful for distinguishing between different files while monitoring.
+    # However, the tag's cardinality is unbounded.
+    internal_metrics:
+      include_file_tag: true
+ 
+transforms:
+  msg_parser:
+    type: remap
+    inputs: [fileIn]
+    source: |
+      # better to do this check on function level
+      # assert_eq!(exists(.file), exists(.message), message: "The required fields are not received")
+      # https://vector.dev/docs/reference/vrl/functions/#encode_json
+      #.=encode_json({"FilePath": .file, "Message": .message})
+ 
+      # send everything to sinks
+      .=.
+ 
+sinks:
+ 
+  console_print:
+    type: console
+    inputs:
+      - "msg_parser"
+    encoding:
+      codec: "json"
+ 
+  datadog:
+    type: datadog_logs
+    inputs:
+      - "msg_parser"
+    compression: gzip
+    default_api_key: ${DATADOG_API_KEY}
+    # The endpoint to send observability data to
+    # endpoint: http://127.0.0.1:8080
+    site: datadoghq.com

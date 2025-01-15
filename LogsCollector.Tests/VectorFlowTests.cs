@@ -36,6 +36,10 @@ namespace LogsCollector.Tests
             Path.Combine(
                 __originalConfigDirectory,
                 "vector_with_http_source.yaml"));
+        private static readonly string __originalConfigWithDataDogSink = Path.GetFullPath(
+            Path.Combine(
+                __originalConfigDirectory,
+                "vector_with_datadog_sink.yaml"));
         private static readonly string __originalLaunchPs1Path = Path.Combine(__originalProjectDirectory, "Launch.ps1");
         #endregion
 
@@ -54,7 +58,6 @@ namespace LogsCollector.Tests
             _testOutputHelper = testOutputHelper;
             _stdError = new();
             Powershell.EnsureVectorIsAvailable(_stdError);
-            Cosmos.PrepareCosmos(); // clear test db
 
             _port = 7245;
             _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, _port, waitUntil: "LogsTransmitter: [POST]");
@@ -110,6 +113,8 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_config_is_valid()
         {
+            Cosmos.PrepareCosmos(); // clear test db
+
             using var process = Powershell.RunPs1Script(
                 @$"-ExecutionPolicy Bypass -File ""{_testRunLaunchPs1}""",
                 workingDirectory: _testRunDirectory,
@@ -123,6 +128,8 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_logs_are_read_from_file_created_beforehand()
         {
+            Cosmos.PrepareCosmos(); // clear test db
+
             var values = new[]
             {
                 "1_" + Guid.NewGuid(),
@@ -166,6 +173,8 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_logs_are_read_when_batch_size_is_less_than_number_of_lines_in_the_file()
         {
+            Cosmos.PrepareCosmos(); // clear test db
+
             FileSystem.UpdateConfig(
                 path: _testRunConfig,
                 filter: "http:",
@@ -203,6 +212,8 @@ namespace LogsCollector.Tests
         [InlineData("\\r\\n", "\r\n")]
         public void Ensure_logs_are_read_when_custom_delimiter_is_specified(string delimiter, string effectiveDelimiter)
         {
+            Cosmos.PrepareCosmos(); // clear test db
+
             FileSystem.UpdateConfig(path: _testRunConfig, filter: "fileIn:", $@"    line_delimiter: ""{delimiter}""");
 
             int[] rawValues = [0, 1, 2];
@@ -236,6 +247,8 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_logs_are_read_when_multiline_logs_is_specified()
         {
+            Cosmos.PrepareCosmos(); // clear test db
+
             FileSystem.UpdateConfig(
                 path: _testRunConfig,
                 filter: "fileIn:",
@@ -290,6 +303,8 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_logs_are_read_when_updating_first_line_read_all_lines_again()
         {
+            Cosmos.PrepareCosmos(); // clear test db
+
             using var cancellationTokenSource = new CancellationTokenSource();
             using (var stream = File.Create(_testRunRawLog)) { /* close handle */ }
 
@@ -355,6 +370,8 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_logs_are_read_when_updating_last_record()
         {
+            Cosmos.PrepareCosmos(); // clear test db
+
             using var cancellationTokenSource = new CancellationTokenSource();
             using (var stream = File.Create(_testRunRawLog)) { /* close handle */ }
 
@@ -418,6 +435,8 @@ namespace LogsCollector.Tests
         [Fact]
         public void Ensure_logs_are_read_from_file_and_http_sources()
         {
+            Cosmos.PrepareCosmos(); // clear test db
+
             var functionPortWithHttpSource = 7175;
             using var httpSourceFunctionProcess = Powershell.SpawnFunction(
                 __originalAzureFunctionHttpSourceProjectDirectory, 
@@ -443,6 +462,48 @@ namespace LogsCollector.Tests
                 throwIfFound: false,
                 _testOutputHelper,
                 str => str.Contains("HttpSource_value:"));
+
+            AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: null);
+        }
+
+        [Fact]
+        public void Ensure_logs_can_be_pushed_to_Datadog_via_sink()
+        {
+            // no cosmosdb call
+
+            FileSystem.RenameFile(__originalConfigWithDataDogSink, _testRunConfig);
+
+            var values = new[]
+{
+                "datadog_1_" + Guid.NewGuid(),
+                "datadog_2_" + Guid.NewGuid(),
+                "datadog_3_" + Guid.NewGuid(),
+                "datadog_4_" + Guid.NewGuid(),
+                "datadog_5_" + Guid.NewGuid()
+            };
+            File.WriteAllText(_testRunRawLog, $@"{values[0]}
+{values[1]}
+{values[2]}
+{values[3]}
+{values[4]}
+");
+
+            using var process = Powershell.RunPs1Script(
+                @$"-ExecutionPolicy Bypass -File ""{_testRunLaunchPs1}""",
+                workingDirectory: _testRunDirectory,
+                errorStdOutput: _stdError,
+                out var output,
+                out var error,
+                inWindow: false);
+
+            AssertStream.AssertOutput(
+                output!,
+                timeout: TimeSpan.FromSeconds(30),
+                logTag: "mainAssert",
+                expectedCount: 1,
+                throwIfFound: false,
+                _testOutputHelper,
+                str => str.Contains(values[4]));
 
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: null);
         }
