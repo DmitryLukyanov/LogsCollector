@@ -1,13 +1,12 @@
 using System.IO;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Azure.WebJobs;
-using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using System;
-using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
+using Microsoft.Azure.Functions.Worker;
+using System.Text.Json;
 using System.Linq;
 
 namespace LogsTransmitterFunction
@@ -20,72 +19,70 @@ namespace LogsTransmitterFunction
     /// </summary>
 
     // TODO: move to isolated process flow!
-    public static class LogsTransmitterFunction
+    public class LogsTransmitterFunction(ILogger<LogsTransmitterFunction> logger)
     {
         public record LogBatch
         {
-            [JsonProperty("id")]
-            public string Id;
-            [JsonProperty("logs")]
-            public List<dynamic> Logs = [];
-            [JsonProperty("created")]
-            public DateTime Created = DateTime.UtcNow;
-            [JsonProperty("expected_schema")]
-            public bool ExpectedSchema;
+            [JsonPropertyName("id")]
+            public string Id { get; set; }
+            [JsonPropertyName("logs")]
+            public List<dynamic> Logs { get; set; } = [];
+            [JsonPropertyName("created")]
+            public DateTime Created { get; set; } = DateTime.UtcNow;
+            [JsonPropertyName("expected_schema")]
+            public bool ExpectedSchema { get; set; }
         }
 
         public record LogLine
         {
-            [JsonProperty("file")]
-            public string File;
-            [JsonProperty("host")]
-            public string Host;
-            [JsonProperty("message")]
-            public string Message;
-            [JsonProperty("source_type")]
-            public string SourceType;
-            [JsonProperty("timestamp")]
-            public DateTime Timestamp;
+            [JsonPropertyName("file")]
+            public string File { get; set; }
+            [JsonPropertyName("host")]
+            public string Host { get; set; }
+            [JsonPropertyName("message")]
+            public string Message { get; set; }
+            [JsonPropertyName("source_type")]
+            public string SourceType { get; set; }
+            [JsonPropertyName("timestamp")]
+            public DateTime Timestamp { get; set; }
         }
 
         public record ParsedMessage
         {
-            [JsonProperty("engagement_id")]
-            public string EngagementId;
-            [JsonProperty("title")]
-            public string Title;
-            [JsonProperty("severity")]
-            public string Severity;
-            [JsonProperty("stack_trace")]
-            public string StackTrace;
-            [JsonProperty("full_message")]
-            public string FullMessage;
-            [JsonProperty("file")]
-            public string File;
-            [JsonProperty("host")]
-            public string Host;
-            [JsonProperty("source_type")]
-            public string SourceType;
-            [JsonProperty("timestamp")]
-            public DateTime Timestamp;
-            [JsonProperty("expected_message_schema")]
+            [JsonPropertyName("engagement_id")]
+            public string EngagementId { get; set; }
+            [JsonPropertyName("title")]
+            public string Title { get; set; }
+            [JsonPropertyName("severity")]
+            public string Severity { get; set; }
+            [JsonPropertyName("stack_trace")]
+            public string StackTrace { get; set; }
+            [JsonPropertyName("full_message")]
+            public string FullMessage { get; set; }
+            [JsonPropertyName("file")]
+            public string File { get; set; }
+            [JsonPropertyName("host")]
+            public string Host { get; set; }
+            [JsonPropertyName("source_type")]
+            public string SourceType { get; set; }
+            [JsonPropertyName("timestamp")]
+            public DateTime Timestamp { get; set; }
+            [JsonPropertyName("expected_message_schema")]
             public bool ExpectedMessage => Title != null || EngagementId != null || Severity != null || StackTrace != null;
         }
 
-        [FunctionName("LogsTransmitter")]
-        public static async Task<IActionResult> Run(
-            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req,
-            [CosmosDB(
-                databaseName: "LogDb",
-                containerName: "CollectedLogs",
-                CreateIfNotExists = true,
-                PartitionKey = "/id",
-                Connection = "CosmosDbConnectionSetting")]IAsyncCollector<LogBatch> output,
-            ILogger log)
+        [Function("LogsTransmitter")]
+        [CosmosDBOutput(
+            databaseName: "LogDb",
+            containerName: "CollectedLogs",
+            CreateIfNotExists = true,
+            PartitionKey = "/id",
+            Connection = "CosmosDbConnectionSetting")]
+        public async Task<LogBatch> Run(
+            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequest req)
         {
-            log.LogInformation("C# HTTP trigger function processed a request.");
+            logger.LogInformation("C# HTTP trigger function processed a request.");
 
-            // NOTE: the default batch size is 10 000 log records
             try
             {
                 using var stream = new StreamReader(req.Body);
@@ -99,7 +96,7 @@ namespace LogsTransmitterFunction
                 {
                     try
                     {
-                        var lines = JsonConvert.DeserializeObject<LogLine[]>(line);
+                        var lines = JsonSerializer.Deserialize<LogLine[]>(line);
                         var parsedLines = lines.Select(ParseMessage).ToList();
 
                         batch.Logs.AddRange(parsedLines);
@@ -113,13 +110,11 @@ namespace LogsTransmitterFunction
                     }
                 }
 
-                await output.AddAsync(batch);
-
-                return new OkObjectResult($"Number of logs: {batch.Logs.Count}");
+                return batch;
             }
             catch (Exception ex)
             {
-                log.LogError(new EventId(), ex, ex.Message);
+                logger.LogError(ex, ex.Message);
                 throw;
             }
         }
@@ -145,27 +140,27 @@ namespace LogsTransmitterFunction
                 )
             {
                 // the message structure has not been recognized
-                return new ParsedMessage 
-                { 
-                    FullMessage = message, 
-                    File = logLine.File, 
-                    Timestamp = logLine.Timestamp, 
+                return new ParsedMessage
+                {
+                    FullMessage = message,
+                    File = logLine.File,
+                    Timestamp = logLine.Timestamp,
                     Host = logLine.Host,
                     SourceType = logLine.SourceType,
                 };
             }
 
             // TODO: regex instead?
-            var engagementId = message.Substring(0, titleIndex).Replace(EngagementIdToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
-            var title = message.Substring(titleIndex, severityIndex - titleIndex).Replace(TitleToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
-            var severity = message.Substring(severityIndex, stackTraceIndex - severityIndex).Replace(SeverityToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
-            var stackTrace = message.Substring(stackTraceIndex, message.Length - stackTraceIndex).Replace(StackTraceToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
+            var engagementId = message[..titleIndex].Replace(EngagementIdToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
+            var title = message[titleIndex..severityIndex].Replace(TitleToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
+            var severity = message[severityIndex..stackTraceIndex].Replace(SeverityToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
+            var stackTrace = message[stackTraceIndex..].Replace(StackTraceToken, string.Empty).Trim().TrimEnd('-').Trim().Trim('\"').Trim();
 
-            return new ParsedMessage 
+            return new ParsedMessage
             {
-                EngagementId = engagementId, 
-                Title = title, 
-                StackTrace = stackTrace, 
+                EngagementId = engagementId,
+                Title = title,
+                StackTrace = stackTrace,
                 Severity = severity,
                 FullMessage = message,
 

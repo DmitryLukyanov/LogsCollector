@@ -1,9 +1,11 @@
+using DotNetEnv;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Xunit.Abstractions;
 
 namespace LogsCollector.Tests
 {
+    // TODO: clarify timeout values
     public partial class VectorFlowTests : IDisposable
     {
         #region static
@@ -40,11 +42,15 @@ namespace LogsCollector.Tests
             Path.Combine(
                 __originalConfigDirectory,
                 "vector_with_datadog_sink.yaml"));
+        private static readonly string __originalConfigWithHttpSourceAndDataDogSink = Path.GetFullPath(
+            Path.Combine(
+                __originalConfigDirectory,
+                "vector_with_http_source_to_datadog.yaml"));
         private static readonly string __originalLaunchPs1Path = Path.Combine(__originalProjectDirectory, "Launch.ps1");
         #endregion
 
-        private readonly Process _azureFunctionProcess;
-        private readonly int _port;
+        private Process? _azureFunctionProcess;
+        private const int SinkHttpFunctionPort = 7245;
         private readonly ConcurrentQueue<string> _stdError;
         private readonly ITestOutputHelper _testOutputHelper;
         private readonly string _testRunConfig;
@@ -55,18 +61,21 @@ namespace LogsCollector.Tests
 
         public VectorFlowTests(ITestOutputHelper testOutputHelper)
         {
+            Assert.True(Env.Load(path: Path.Combine(__testDirectory, ".env")).Count() != 0, "The environment variables are not configured");
+
             _testOutputHelper = testOutputHelper;
             _stdError = new();
             Powershell.EnsureVectorIsAvailable(_stdError);
-
-            _port = 7245;
-            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, _port, waitUntil: "LogsTransmitter: [POST]");
 
             /* 
              * sometimes this process is not killed since previous run and this leads to this error:
              * - Only one usage of each socket address 
              */
-            Powershell.KillVector(_stdError);
+            Powershell.KillTool(_stdError, "vector");
+            /*
+             * isolated function process is not killed with powershell shell for some reason, so do it manually
+             */
+            Powershell.KillTool(_stdError, "func");
 
             // prepare test
             _testRunDirectory = FileSystem.CreateDirectory(__testDirectory, $"run_{DateTime.UtcNow:MMddyyyyHHmmss}");
@@ -90,30 +99,46 @@ namespace LogsCollector.Tests
             _azureFunctionProcess?.Dispose();
             if (_stdError != null && !_stdError.IsEmpty)
             {
-                // TODO: merge below checks
-
-                // specific check
                 AssertStream.AssertOutput(
                     _stdError!,
+                    TimeSpan.FromSeconds(10),
+                    testOutputHelper: _testOutputHelper,
+                    // specific check
                     "Only one usage of each socket address",
-                    TimeSpan.FromSeconds(10),
-                    throwIfFound: true,
-                    testOutputHelper: _testOutputHelper);
-
-                // just check on unhandled ERROR
-                AssertStream.AssertOutput(
-                    _stdError!,
+                    // just check on unhandled ERROR
                     " ERROR vector",
-                    TimeSpan.FromSeconds(10),
-                    throwIfFound: true,
-                    testOutputHelper: _testOutputHelper);
+                    // warning mainly related to unsafe configuration
+                    " WARN");
             }
         }
 
-        [Fact]
-        public void Ensure_config_is_valid()
+        [SkippableTheory]
+        [InlineData(1)]
+        [InlineData(2)]
+        [InlineData(3)]
+        [InlineData(4)]
+        public async Task Ensure_config_is_valid(int testCase)
         {
-            Cosmos.PrepareCosmos(); // clear test db
+            var config = testCase switch
+            {
+                1 => null,
+                2 => __originalConfigWithHttpSource,
+                3 => Environment.GetEnvironmentVariable("DATADOG_API_KEY") == null
+                    ? throw new Xunit.SkipException("DATADOG_API_KEY must be specified")
+                    : __originalConfigWithHttpSourceAndDataDogSink,
+                4 => Environment.GetEnvironmentVariable("DATADOG_API_KEY") == null
+                    ? throw new Xunit.SkipException("DATADOG_API_KEY must be specified")
+                    : __originalConfigWithDataDogSink,
+                _ => throw new NotImplementedException()
+            };
+
+            await Cosmos.PrepareCosmos(); // clear test db
+            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+
+            if (config != null)
+            {
+                FileSystem.RenameFile(config, _testRunConfig);
+            }
 
             using var process = Powershell.RunPs1Script(
                 @$"-ExecutionPolicy Bypass -File ""{_testRunLaunchPs1}""",
@@ -126,9 +151,10 @@ namespace LogsCollector.Tests
         }
 
         [Fact]
-        public void Ensure_logs_are_read_from_file_created_beforehand()
+        public async Task Ensure_logs_are_read_from_file_created_beforehand()
         {
-            Cosmos.PrepareCosmos(); // clear test db
+            await Cosmos.PrepareCosmos(); // clear test db
+            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             var values = new[]
             {
@@ -168,12 +194,18 @@ namespace LogsCollector.Tests
 
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: 1);
             Cosmos.ValidateRecods(values);
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 5M, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 5M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "http").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
         }
 
         [Fact]
-        public void Ensure_logs_are_read_when_batch_size_is_less_than_number_of_lines_in_the_file()
+        public async Task Ensure_logs_are_read_when_batch_size_is_less_than_number_of_lines_in_the_file()
         {
-            Cosmos.PrepareCosmos(); // clear test db
+            await Cosmos.PrepareCosmos(); // clear test db
+            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             FileSystem.UpdateConfig(
                 path: _testRunConfig,
@@ -194,7 +226,7 @@ namespace LogsCollector.Tests
 
             AssertStream.AssertOutput(
                 output!,
-                timeout: TimeSpan.FromSeconds(45),
+                timeout: TimeSpan.FromSeconds(30),
                 logTag: "mainAssert",
                 expectedCount: null,
                 throwIfFound: false,
@@ -205,14 +237,20 @@ namespace LogsCollector.Tests
 
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: 6); // 6 different http calls
             Cosmos.ValidateRecods(values);
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 51M, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 51M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "http").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
         }
 
         [Theory]
         [InlineData("\\n", "\n")]
         [InlineData("\\r\\n", "\r\n")]
-        public void Ensure_logs_are_read_when_custom_delimiter_is_specified(string delimiter, string effectiveDelimiter)
+        public async Task Ensure_logs_are_read_when_custom_delimiter_is_specified(string delimiter, string effectiveDelimiter)
         {
-            Cosmos.PrepareCosmos(); // clear test db
+            await Cosmos.PrepareCosmos(); // clear test db
+            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             FileSystem.UpdateConfig(path: _testRunConfig, filter: "fileIn:", $@"    line_delimiter: ""{delimiter}""");
 
@@ -242,12 +280,18 @@ namespace LogsCollector.Tests
 
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: 1);
             Cosmos.ValidateRecods(values);
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 3M, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 3M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "http").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
         }
 
         [Fact]
-        public void Ensure_logs_are_read_when_multiline_logs_is_specified()
+        public async Task Ensure_logs_are_read_when_multiline_logs_is_specified()
         {
-            Cosmos.PrepareCosmos(); // clear test db
+            await Cosmos.PrepareCosmos(); // clear test db
+            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             FileSystem.UpdateConfig(
                 path: _testRunConfig,
@@ -298,12 +342,24 @@ namespace LogsCollector.Tests
                 TimeSpan.FromSeconds(10),
                 expectedCount: 2); // the first batch will consist of items [0, 1], the second => [2]
             Cosmos.ValidateRecods(values);
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 3M, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 3M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "http").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
         }
 
+        /*
+         * WARNING:
+         * Apperently such way will emit 14 events (instead 12) that is more than actually required, 
+         * but good part that this is a synthetic case that is not supposed to happen.
+         * The result is: 1, 2, 3, 3 (not expected), 0, 1, 2, 3, 4(not expected), 0, 1, 2, 3, 4
+         */
         [Fact]
-        public void Ensure_logs_are_read_when_updating_first_line_read_all_lines_again()
+        public async Task Ensure_logs_are_read_when_updating_first_line_read_all_lines_again()
         {
-            Cosmos.PrepareCosmos(); // clear test db
+            await Cosmos.PrepareCosmos(); // clear test db
+            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             using var cancellationTokenSource = new CancellationTokenSource();
             using (var stream = File.Create(_testRunRawLog)) { /* close handle */ }
@@ -365,12 +421,19 @@ namespace LogsCollector.Tests
             }
 
             cancellationTokenSource.Cancel();
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                // see comment above why 14 and not 12
+                Assert.Equal(expected: 14M, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 14M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "http").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
         }
 
         [Fact]
-        public void Ensure_logs_are_read_when_updating_last_record()
+        public async Task Ensure_logs_are_read_when_updating_last_record()
         {
-            Cosmos.PrepareCosmos(); // clear test db
+            await Cosmos.PrepareCosmos(); // clear test db
+            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             using var cancellationTokenSource = new CancellationTokenSource();
             using (var stream = File.Create(_testRunRawLog)) { /* close handle */ }
@@ -430,17 +493,23 @@ namespace LogsCollector.Tests
             }
 
             cancellationTokenSource.Cancel();
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 6M, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 6M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "http").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
         }
 
         [Fact]
-        public void Ensure_logs_are_read_from_file_and_http_sources()
+        public async Task Ensure_logs_are_read_from_file_and_http_sources()
         {
-            Cosmos.PrepareCosmos(); // clear test db
+            await Cosmos.PrepareCosmos(); // clear test db
+            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             var functionPortWithHttpSource = 7175;
             using var httpSourceFunctionProcess = Powershell.SpawnFunction(
-                __originalAzureFunctionHttpSourceProjectDirectory, 
-                _stdError, 
+                __originalAzureFunctionHttpSourceProjectDirectory,
+                _stdError,
                 functionPortWithHttpSource,
                 "LogsSource: [GET]");
 
@@ -464,17 +533,27 @@ namespace LogsCollector.Tests
                 str => str.Contains("HttpSource_value:"));
 
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: null);
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 2M, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 2M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "http").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
         }
 
-        [Fact]
-        public void Ensure_logs_can_be_pushed_to_Datadog_via_sink()
+        [SkippableFact]
+        public async Task Ensure_logs_can_be_pushed_to_Datadog_via_sink()
         {
+            if (Environment.GetEnvironmentVariable("DATADOG_API_KEY") == null)
+            {
+                throw new Xunit.SkipException("DATADOG_API_KEY must be specified");
+            }
+
             // no cosmosdb call
 
             FileSystem.RenameFile(__originalConfigWithDataDogSink, _testRunConfig);
 
             var values = new[]
-{
+            {
                 "datadog_1_" + Guid.NewGuid(),
                 "datadog_2_" + Guid.NewGuid(),
                 "datadog_3_" + Guid.NewGuid(),
@@ -506,6 +585,68 @@ namespace LogsCollector.Tests
                 str => str.Contains(values[4]));
 
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: null);
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 5M, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 5M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "datadog").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
+        }
+
+        [SkippableFact]
+        public async Task Ensure_cosmos_records_are_transmitted_to_Datadog()
+        {
+            if (Environment.GetEnvironmentVariable("DATADOG_API_KEY") == null)
+            {
+                throw new Xunit.SkipException("DATADOG_API_KEY must be specified");
+            }
+
+            await Cosmos.PrepareCosmos(containerName: Cosmos.SourceContainerName); // clear test db
+            var functionPortWithHttpSource = 7175;
+            using var httpSourceFunctionProcess = Powershell.SpawnFunction(
+                __originalAzureFunctionHttpSourceProjectDirectory,
+                _stdError,
+                functionPortWithHttpSource,
+                "LogsSource: [GET]");
+
+            FileSystem.RenameFile(__originalConfigWithHttpSourceAndDataDogSink, _testRunConfig);
+
+            var values = new[]
+            {
+                "datadog_1_" + Guid.NewGuid(),
+                "datadog_2_" + Guid.NewGuid(),
+                "datadog_3_" + Guid.NewGuid(),
+                "datadog_4_" + Guid.NewGuid(),
+                "datadog_5_" + Guid.NewGuid()
+            };
+            await Cosmos.InsertRecords(values, containerName: Cosmos.SourceContainerName);
+
+            using var process = Powershell.RunPs1Script(
+                @$"-ExecutionPolicy Bypass -File ""{_testRunLaunchPs1}""",
+                workingDirectory: _testRunDirectory,
+                errorStdOutput: _stdError,
+                out var output,
+                out var error,
+                inWindow: false);
+
+            AssertStream.AssertOutput(
+                output!,
+                timeout: TimeSpan.FromSeconds(30),
+                logTag: "mainAssert",
+                expectedCount: 1,
+                throwIfFound: false,
+                _testOutputHelper,
+                str => str.Contains(values[0]),
+                str => str.Contains(values[1]),
+                str => str.Contains(values[2]),
+                str => str.Contains(values[3]),
+                str => str.Contains(values[4]));
+
+            AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(30), expectedCount: 2);
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 1, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 1, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "datadog").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
         }
     }
 }

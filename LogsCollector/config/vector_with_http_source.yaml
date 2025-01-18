@@ -1,11 +1,9 @@
 api:
   enabled: true
 
-# Controls if sources will wait for destination sinks to deliver the events,
-# or persist them to a disk buffer, before acknowledging receipt.
-# If set to true, all capable sources will have acknowledgements enabled.
-acknowledgements:
-  enabled: true
+# NOT SUPPORTED FOR http_client source
+#acknowledgements:
+#  enabled: true
 
 data_dir: ./data
 
@@ -20,6 +18,9 @@ sources:
         - text/html
     method: GET
     scrape_interval_secs: 15
+    query:
+      dummyRequest: 
+        - "true"
     tls:
       verify_certificate: false
 

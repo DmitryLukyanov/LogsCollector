@@ -1,27 +1,40 @@
 using System;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Azure.WebJobs;
-using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Azure.Cosmos;
+using System.Linq;
+using Microsoft.AspNetCore.Mvc;
 
 namespace LogsSourceFunction
 {
-    // TODO: move to isolated process flow!
-    public static class LogsSourceFunction
+    public class LogsSourceFunction(ILogger<LogsSourceFunction> logger, IConfiguration configuration)
     {
-        [FunctionName("LogsSource")]
-        public static Task<IActionResult> Run(
-            [HttpTrigger(AuthorizationLevel.Function, "get", Route = null)] HttpRequest req,
-            ILogger log)
+        [Function("LogsSource")]
+        public Task<IActionResult> Run(
+            [HttpTrigger(AuthorizationLevel.Function, "get", Route = null)] HttpRequest req)
         {
-            log.LogInformation("C# HTTP trigger function processed a request.");
+            logger.LogInformation("C# HTTP trigger function processed a request.");
 
-            // Emulate retriving data, for example SQL result
-            string responseMessage = $"HttpSource_value:{Guid.NewGuid().ToString()}";
+            if (req.Query.TryGetValue("dummyRequest", out _))
+            {
+                string[] responseMessage = [$"HttpSource_value:{Guid.NewGuid()}"];
+                return Task.FromResult((IActionResult)new OkObjectResult(responseMessage));
+            }
+            else
+            {
+                var connectionString = configuration.GetConnectionString("CosmosDb");
+                using var client = new CosmosClient(connectionString: connectionString);
+                var dbName = configuration.GetValue<string>("CosmosDbLogsDatabase");
+                var containerName = configuration.GetValue<string>("CosmosDbLogsContainer");
+                var container = client.GetContainer(dbName, containerName);
+                var querable = container.GetItemLinqQueryable<dynamic>(allowSynchronousQueryExecution: true).ToList();
+                var messages = querable.Select(i => (string)i.message.ToString()).ToArray();
 
-            return Task.FromResult((IActionResult)new OkObjectResult(responseMessage));
+                return Task.FromResult((IActionResult)new OkObjectResult(messages));
+            }
         }
     }
 }

@@ -1,7 +1,10 @@
-﻿using Microsoft.Azure.Cosmos;
-using Newtonsoft.Json;
+﻿using GraphQL;
+using GraphQL.Client.Http;
+using GraphQL.Client.Serializer.SystemTextJson;
+using Microsoft.Azure.Cosmos;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text.Json;
 using Xunit.Abstractions;
 using static LogsTransmitterFunction.LogsTransmitterFunction;
 
@@ -11,17 +14,23 @@ namespace LogsCollector.Tests
     {
         public static class Cosmos
         {
-            private const string CosmosDbConnectionString = "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==";
-            private const string DbName = "LogDb";
-            private const string ContainerName = "CollectedLogs";
+            public const string DbName = "LogDb";
+            public const string ContainerName = "CollectedLogs";
+            public const string SourceContainerName = "SourceLogs";
+            private static readonly string __connectionString;
 
-            public static void PrepareCosmos()
+            static Cosmos()
             {
-                using var client = new CosmosClient(connectionString: CosmosDbConnectionString);
-                var container = client.GetContainer(DbName, ContainerName);
+                __connectionString = Environment.GetEnvironmentVariable("COSMOSDB_CONNECTION_STRING") ?? throw new InvalidOperationException("COSMOSDB_CONNECTION_STRING");
+            }
+
+            public static async Task PrepareCosmos(string containerName = ContainerName)
+            {
+                using var client = new CosmosClient(connectionString: __connectionString);
+                var container = client.GetContainer(DbName, containerName);
                 try
                 {
-                    container.DeleteContainerAsync().GetAwaiter().GetResult();
+                    await container.DeleteContainerAsync();
                 }
                 catch (Microsoft.Azure.Cosmos.CosmosException)
                 {
@@ -34,12 +43,26 @@ namespace LogsCollector.Tests
                 }
             }
 
+            public static async Task InsertRecords(IEnumerable<string> messages, string containerName = ContainerName)
+            {
+                using var client = new CosmosClient(connectionString: __connectionString);
+                await client.CreateDatabaseIfNotExistsAsync(DbName);
+                var database = client.GetDatabase(DbName);
+                await database.CreateContainerIfNotExistsAsync(containerName, "/id");
+                var container = client.GetContainer(DbName, containerName);
+
+                foreach (var message in messages)
+                {
+                    await container.CreateItemAsync(new { id = Guid.NewGuid(), message = message });
+                }
+            }
+
             private static void ValidateRecods(Action<IEnumerable<string>> validateMessagesFunc)
             {
-                using var client = new CosmosClient(connectionString: CosmosDbConnectionString);
+                using var client = new CosmosClient(connectionString: __connectionString);
                 var container = client.GetContainer(DbName, ContainerName);
                 var querable = container.GetItemLinqQueryable<LogBatch>(allowSynchronousQueryExecution: true).ToList();
-                var messages = (querable.SelectMany(i => i.Logs)!.Cast<Newtonsoft.Json.Linq.JObject>().ToList()).Select(i => i.GetValue("message")!.ToString());
+                var messages = (querable.SelectMany(i => i.Logs)!.Cast<Newtonsoft.Json.Linq.JObject>().ToList()).Select(i => i.GetValue("full_message")!.ToString());
                 validateMessagesFunc(messages);
             }
 
@@ -103,7 +126,7 @@ namespace LogsCollector.Tests
             {
                 ArgumentNullException.ThrowIfNull(newValues, paramName: nameof(newValues));
                 var configFileLines = new LinkedList<string>(File.ReadAllLines(path));
-                var node = FindLinkedListNode(configFileLines, (str) => str.Contains(filter)) 
+                var node = FindLinkedListNode(configFileLines, (str) => str.Contains(filter))
                     ?? throw new InvalidOperationException($"The '{filter}:' node has not been found in config file."); // the source name
                 foreach (var newValue in newValues)
                 {
@@ -149,7 +172,7 @@ namespace LogsCollector.Tests
                     return true;
                 }
 
-                var json = JsonConvert.DeserializeObject<LogLine>(line)!;
+                var json = JsonSerializer.Deserialize<LogLine>(line)!;
                 return
                     json.File == "logs\\raw.log" &&
                     json.Host != null &&
@@ -164,7 +187,7 @@ namespace LogsCollector.Tests
             public static Process RunPs1Script(
                 string arguments,
                 string workingDirectory,
-                string waitUntil,
+                string? waitUntil,
                 ConcurrentQueue<string> errorStdOutput,
                 TimeSpan? timeout = null)
             {
@@ -182,7 +205,7 @@ namespace LogsCollector.Tests
                 ConcurrentQueue<string> errorStdOutput,
                 out ConcurrentQueue<string>? output,
                 out ConcurrentQueue<string>? error,
-                bool inWindow = false)
+                bool inWindow = false /* true is for debug purpose */)
             {
                 output = null;
                 error = null;
@@ -242,13 +265,13 @@ namespace LogsCollector.Tests
                 }
             }
 
-            public static void KillVector(ConcurrentQueue<string> errorStdOutput)
+            public static void KillTool(ConcurrentQueue<string> errorStdOutput, string name)
             {
                 using (var killProcess = RunPs1Script(
-                    arguments: @$"-Command ""Get-Process -Name vector | Stop-Process""",
+                    arguments: @$"-Command ""Get-Process -Name {name} | Stop-Process""",
                     errorStdOutput: errorStdOutput,
                     workingDirectory: __originalAzureFunctionProjectDirectory,
-                    waitUntil: null!)) { /* kill process that listens port 8686 */ }
+                    waitUntil: null)) { /* kill process that listens port 8686 */ }
                 Thread.Sleep(TimeSpan.FromSeconds(5)); // sanitize sleep
             }
 
@@ -258,7 +281,7 @@ namespace LogsCollector.Tests
                     arguments: @$"-Command ""vector --version""",
                     workingDirectory: __originalAzureFunctionProjectDirectory,
                     errorStdOutput: errorStdOutput,
-                    waitUntil: "vector 0."!)) { /* ensure vector is available on the machine */ }
+                    waitUntil: "vector 0.")) { /* ensure vector is available on the machine */ }
             }
 
             public static Process SpawnFunction(string source, ConcurrentQueue<string> errorStdOutput, int port, string waitUntil) =>
@@ -309,7 +332,7 @@ namespace LogsCollector.Tests
                     {
                         if (!throwIfFound)
                         {
-                            Assert.Fail($"The output must match func ({logTag}), but was not during {timeout} ({string.Join(",", output)})");
+                            Assert.Fail($"The output must match func ({logTag}), but was not during {timeout}\n({string.Join("\n\t\t\t", output)})");
                         }
                     }
 
@@ -334,7 +357,147 @@ namespace LogsCollector.Tests
             }
 
             public static void AssertOutput(ConcurrentQueue<string> output, string expectedValue, TimeSpan timeout, int? expectedCount = null, bool throwIfFound = false, ITestOutputHelper? testOutputHelper = null) =>
-                AssertOutput(output, timeout, logTag: expectedValue, expectedCount, throwIfFound, testOutputHelper , (str) => str.Contains(expectedValue));
+                AssertOutput(output, timeout, logTag: expectedValue, expectedCount, throwIfFound, testOutputHelper, (str) => str.Contains(expectedValue));
+
+            public static void AssertOutput(
+                ConcurrentQueue<string> output,
+                TimeSpan timeout,
+                ITestOutputHelper? testOutputHelper = null,
+                params string[] notExpectedValues)
+            {
+                ArgumentNullException.ThrowIfNull(output, nameof(output));
+                ArgumentNullException.ThrowIfNull(notExpectedValues, nameof(notExpectedValues));
+                ArgumentOutOfRangeException.ThrowIfZero(notExpectedValues.Length, nameof(notExpectedValues.Length));
+
+                AssertOutput(
+                    output,
+                    timeout,
+                    logTag: $"[{string.Join(",", notExpectedValues)}]",
+                    expectedCount: null,
+                    throwIfFound: true,
+                    testOutputHelper, (str) => notExpectedValues.Any(i =>
+                        str.Contains(i) &&
+                        // TODO: should gone after reconfiguration tls
+                        !str.Contains("verify_certificate")));
+            }
+        }
+
+        public static class GraphQLHelper
+        {
+            private const string GraphQLUri = "http://127.0.0.1:8686/graphql";
+
+            public static async Task ValidateThroughApi(Action<Root> action)
+            {
+                ArgumentNullException.ThrowIfNull(action, nameof(action));
+
+                var options = new GraphQLHttpClientOptions
+                {
+                    EndPoint = new Uri(GraphQLUri)
+                };
+
+                using var client = new GraphQLHttpClient(options, new SystemTextJsonSerializer());
+
+                var request = new GraphQLRequest
+                {
+                    Query = @"query {
+  sources {
+    edges {
+      node {
+        componentId
+        metrics {
+          sentEventsTotal {
+            sentEventsTotal
+          }
+          # Total events that the source has received.
+          receivedEventsTotal {
+            receivedEventsTotal
+          }
+        }
+      }
+    }
+  }
+
+  sinks {
+    edges {
+      node {
+        componentId
+        metrics {
+          sentEventsTotal {
+            sentEventsTotal
+          }
+          receivedEventsTotal {
+            receivedEventsTotal
+          }
+        }
+      }
+    }
+  }
+}"
+                };
+
+                var response = await client.SendQueryAsync<Root>(request);
+                action(response.Data);
+            }
+
+            public class Root
+            {
+                public SourcesResponse? Sources { get; set; }
+                public SinksResponse? Sinks { get; set; }
+            }
+
+            public class SourcesResponse
+            {
+                public List<SourceEdge>? Edges { get; set; }
+            }
+
+            public class SourceEdge
+            {
+                public SourceNode? Node { get; set; }
+            }
+
+            public class SourceNode
+            {
+                public string? ComponentId { get; set; }
+                public SourceMetrics? Metrics { get; set; }
+            }
+
+            public class SourceMetrics
+            {
+                public SentEventsTotalSummary? SentEventsTotal { get; set; }
+                public ReceivedEventsTotalSummary? ReceivedEventsTotal { get; set; }
+            }
+
+            public class SentEventsTotalSummary
+            {
+                public decimal? SentEventsTotal { get; set; }
+            }
+
+            public class ReceivedEventsTotalSummary
+            {
+                public decimal? ReceivedEventsTotal { get; set; }
+            }
+
+            public class SinksResponse
+            {
+                public List<SinkEdge>? Edges { get; set; }
+            }
+
+            public class SinkEdge
+            {
+                public SinkNode? Node { get; set; }
+            }
+
+            public class SinkNode
+            {
+                public string? ComponentId { get; set; }
+                public SinkMetrics? Metrics { get; set; }
+            }
+
+            public class SinkMetrics
+            {
+                public SentEventsTotalSummary? SentEventsTotal { get; set; }
+                public ReceivedEventsTotalSummary? ReceivedEventsTotal { get; set; }
+            }
         }
     }
 }
