@@ -19,8 +19,8 @@ sources:
     method: GET
     scrape_interval_secs: 15
     query:
-      dummyRequest: 
-        - "true"
+      requestType: 
+        - "dummy"
     tls:
       verify_certificate: false
 

@@ -38,6 +38,10 @@ namespace LogsCollector.Tests
             Path.Combine(
                 __originalConfigDirectory,
                 "vector_with_http_source.yaml"));
+        private static readonly string __originalConfig = Path.GetFullPath(
+            Path.Combine(
+                __originalConfigDirectory,
+                "vector.yaml"));
         private static readonly string __originalConfigWithDataDogSink = Path.GetFullPath(
             Path.Combine(
                 __originalConfigDirectory,
@@ -46,10 +50,20 @@ namespace LogsCollector.Tests
             Path.Combine(
                 __originalConfigDirectory,
                 "vector_with_http_source_to_datadog.yaml"));
+
+        private static readonly string __originalInternalLogsConfig = Path.GetFullPath(
+            Path.Combine(
+                __originalConfigDirectory,
+                "vector_with_internal_logs.yaml"));
+
+        private static readonly string __originalLogsConfigWithDedupeTransform = Path.GetFullPath(
+            Path.Combine(
+                __originalConfigDirectory,
+                "vector_with_dedupe_transform.yaml"));
+
         private static readonly string __originalLaunchPs1Path = Path.Combine(__originalProjectDirectory, "Launch.ps1");
         #endregion
 
-        private Process? _azureFunctionProcess;
         private const int SinkHttpFunctionPort = 7245;
         private readonly ConcurrentQueue<string> _stdError;
         private readonly ITestOutputHelper _testOutputHelper;
@@ -58,10 +72,11 @@ namespace LogsCollector.Tests
         private readonly string _testRunLaunchPs1;
         private readonly string _testRunLogDirectory;
         private readonly string _testRunRawLog;
+        private readonly string _testRunConfigDirectory;
 
         public VectorFlowTests(ITestOutputHelper testOutputHelper)
         {
-            Assert.True(Env.Load(path: Path.Combine(__testDirectory, ".env")).Count() != 0, "The environment variables are not configured");
+            Assert.True(Env.Load(path: Path.Combine(__testDirectory, ".env")).Any(), "The environment variables are not configured");
 
             _testOutputHelper = testOutputHelper;
             _stdError = new();
@@ -83,20 +98,14 @@ namespace LogsCollector.Tests
             _testRunRawLog = Path.Combine(_testRunLogDirectory, "raw.log");
             _testRunLaunchPs1 = FileSystem.CopyFile(__originalLaunchPs1Path, _testRunDirectory, Path.GetFileName(__originalLaunchPs1Path));
 
-            var testRunConfigDirectory = FileSystem.CopyDirectory(
-                original: __originalConfigDirectory,
-                _testRunDirectory, Path.GetFileName(__originalConfigDirectory));
-            _testRunConfig = Path.Combine(testRunConfigDirectory, "vector.yaml");
-            if (!File.Exists(_testRunConfig))
-            {
-                throw new InvalidOperationException("The test run config file doesn't exist");
-            }
+            _testRunConfigDirectory = Directory.CreateDirectory(Path.Combine(_testRunDirectory, "config")).FullName;
+            _testRunConfig = FileSystem.CopyFile(
+                original: __originalConfig,
+                _testRunConfigDirectory, "vector.yaml");
         }
 
         public void Dispose()
         {
-            _azureFunctionProcess?.Close();
-            _azureFunctionProcess?.Dispose();
             if (_stdError != null && !_stdError.IsEmpty)
             {
                 AssertStream.AssertOutput(
@@ -117,6 +126,8 @@ namespace LogsCollector.Tests
         [InlineData(2)]
         [InlineData(3)]
         [InlineData(4)]
+        [InlineData(5)]
+        [InlineData(6)]
         public async Task Ensure_config_is_valid(int testCase)
         {
             var config = testCase switch
@@ -129,11 +140,13 @@ namespace LogsCollector.Tests
                 4 => Environment.GetEnvironmentVariable("DATADOG_API_KEY") == null
                     ? throw new Xunit.SkipException("DATADOG_API_KEY must be specified")
                     : __originalConfigWithDataDogSink,
+                5 => __originalInternalLogsConfig,
+                6 => __originalLogsConfigWithDedupeTransform,
                 _ => throw new NotImplementedException()
             };
 
             await Cosmos.PrepareCosmos(); // clear test db
-            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             if (config != null)
             {
@@ -154,7 +167,7 @@ namespace LogsCollector.Tests
         public async Task Ensure_logs_are_read_from_file_created_beforehand()
         {
             await Cosmos.PrepareCosmos(); // clear test db
-            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             var values = new[]
             {
@@ -205,7 +218,7 @@ namespace LogsCollector.Tests
         public async Task Ensure_logs_are_read_when_batch_size_is_less_than_number_of_lines_in_the_file()
         {
             await Cosmos.PrepareCosmos(); // clear test db
-            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             FileSystem.UpdateConfig(
                 path: _testRunConfig,
@@ -250,7 +263,7 @@ namespace LogsCollector.Tests
         public async Task Ensure_logs_are_read_when_custom_delimiter_is_specified(string delimiter, string effectiveDelimiter)
         {
             await Cosmos.PrepareCosmos(); // clear test db
-            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             FileSystem.UpdateConfig(path: _testRunConfig, filter: "fileIn:", $@"    line_delimiter: ""{delimiter}""");
 
@@ -291,7 +304,7 @@ namespace LogsCollector.Tests
         public async Task Ensure_logs_are_read_when_multiline_logs_is_specified()
         {
             await Cosmos.PrepareCosmos(); // clear test db
-            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             FileSystem.UpdateConfig(
                 path: _testRunConfig,
@@ -359,7 +372,7 @@ namespace LogsCollector.Tests
         public async Task Ensure_logs_are_read_when_updating_first_line_read_all_lines_again()
         {
             await Cosmos.PrepareCosmos(); // clear test db
-            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             using var cancellationTokenSource = new CancellationTokenSource();
             using (var stream = File.Create(_testRunRawLog)) { /* close handle */ }
@@ -433,7 +446,7 @@ namespace LogsCollector.Tests
         public async Task Ensure_logs_are_read_when_updating_last_record()
         {
             await Cosmos.PrepareCosmos(); // clear test db
-            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             using var cancellationTokenSource = new CancellationTokenSource();
             using (var stream = File.Create(_testRunRawLog)) { /* close handle */ }
@@ -504,7 +517,7 @@ namespace LogsCollector.Tests
         public async Task Ensure_logs_are_read_from_file_and_http_sources()
         {
             await Cosmos.PrepareCosmos(); // clear test db
-            _azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
 
             var functionPortWithHttpSource = 7175;
             using var httpSourceFunctionProcess = Powershell.SpawnFunction(
@@ -525,7 +538,7 @@ namespace LogsCollector.Tests
 
             AssertStream.AssertOutput(
                 output!,
-                timeout: TimeSpan.FromSeconds(30),
+                timeout: TimeSpan.FromSeconds(130),
                 logTag: "mainAssert",
                 expectedCount: 2,
                 throwIfFound: false,
@@ -612,11 +625,11 @@ namespace LogsCollector.Tests
 
             var values = new[]
             {
-                "datadog_1_" + Guid.NewGuid(),
-                "datadog_2_" + Guid.NewGuid(),
-                "datadog_3_" + Guid.NewGuid(),
-                "datadog_4_" + Guid.NewGuid(),
-                "datadog_5_" + Guid.NewGuid()
+                (Id: 1, Message: "datadog_1_" + Guid.NewGuid()),
+                (Id: 2, Message: "datadog_2_" + Guid.NewGuid()),
+                (Id: 3, Message: "datadog_3_" + Guid.NewGuid()),
+                (Id: 4, Message: "datadog_4_" + Guid.NewGuid()),
+                (Id: 5, Message: "datadog_5_" + Guid.NewGuid())
             };
             await Cosmos.InsertRecords(values, containerName: Cosmos.SourceContainerName);
 
@@ -630,22 +643,130 @@ namespace LogsCollector.Tests
 
             AssertStream.AssertOutput(
                 output!,
-                timeout: TimeSpan.FromSeconds(30),
+                timeout: TimeSpan.FromSeconds(130),
                 logTag: "mainAssert",
                 expectedCount: 1,
                 throwIfFound: false,
                 _testOutputHelper,
-                str => str.Contains(values[0]),
-                str => str.Contains(values[1]),
-                str => str.Contains(values[2]),
-                str => str.Contains(values[3]),
-                str => str.Contains(values[4]));
+                str => str.Contains(values[0].Message),
+                str => str.Contains(values[1].Message),
+                str => str.Contains(values[2].Message),
+                str => str.Contains(values[3].Message),
+                str => str.Contains(values[4].Message));
 
             AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(30), expectedCount: 2);
             await GraphQLHelper.ValidateThroughApi((result) =>
             {
                 Assert.Equal(expected: 1, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
                 Assert.Equal(expected: 1, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "datadog").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
+        }
+
+        [Fact]
+        public async Task Ensure_logs_are_read_from_file_created_beforehand_and_that_internal_logs_are_saved_through_second_config()
+        {
+            FileSystem.RenameFile(__originalInternalLogsConfig, _testRunConfig);
+
+            await Cosmos.PrepareCosmos(); // clear test db
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+
+            var values = new[]
+            {
+                "1_" + Guid.NewGuid(),
+                "2_" + Guid.NewGuid(),
+                "3_" + Guid.NewGuid(),
+                "4_" + Guid.NewGuid(),
+                "5_" + Guid.NewGuid()
+            };
+            File.WriteAllText(_testRunRawLog, $@"{values[0]}
+{values[1]}
+{values[2]}
+{values[3]}
+{values[4]}
+");
+
+            using var process = Powershell.RunPs1Script(
+                @$"-ExecutionPolicy Bypass -File ""{_testRunLaunchPs1}""",
+                workingDirectory: _testRunDirectory,
+                errorStdOutput: _stdError,
+                out var output,
+                out var error,
+                inWindow: false);
+
+            AssertStream.AssertOutput(
+                output!,
+                timeout: TimeSpan.FromSeconds(30),
+                logTag: "mainAssert",
+                expectedCount: null,
+                throwIfFound: false,
+                _testOutputHelper,
+                str => Parser.IsLineValid(str, () => $"{values[0]}\r"),
+                str => Parser.IsLineValid(str, () => $"{values[1]}\r"),
+                str => Parser.IsLineValid(str, () => $"{values[2]}\r"),
+                str => Parser.IsLineValid(str, () => $"{values[3]}\r"),
+                str => Parser.IsLineValid(str, () => $"{values[4]}\r"));
+
+            AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: 1);
+            Cosmos.ValidateRecods(values);
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 5M, result!.Sources!.Edges!.Single(i => i.Node!.ComponentId == "fileIn").Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 5M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "http").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
+            Powershell.KillTool(_stdError, "vector");
+            // No actual messages are expected in the logs
+            var outputContent = File.ReadAllLines(Path.Combine(_testRunDirectory, "output", "output.json"));
+            Assert.Contains(outputContent, (s) => s.Contains("Received HTTP request."));
+        }
+
+        [Fact]
+        public async Task Ensure_logs_are_read_from_file_created_beforehand_without_duplicates()
+        {
+            FileSystem.RenameFile(__originalLogsConfigWithDedupeTransform, _testRunConfig);
+
+            await Cosmos.PrepareCosmos(); // clear test db
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+
+            var values = new[]
+            {
+                "1_value",
+                "2_value",
+                "2_value",
+                "2_value",
+                "3_value"
+            };
+            File.WriteAllText(_testRunRawLog, $@"{values[0]}
+{values[1]}
+{values[2]}
+{values[3]}
+{values[4]}
+");
+
+            using var process = Powershell.RunPs1Script(
+                @$"-ExecutionPolicy Bypass -File ""{_testRunLaunchPs1}""",
+                workingDirectory: _testRunDirectory,
+                errorStdOutput: _stdError,
+                out var output,
+                out var error,
+                inWindow: false);
+
+            AssertStream.AssertOutput(
+                output!,
+                timeout: TimeSpan.FromSeconds(30),
+                logTag: "mainAssert",
+                expectedCount: null,
+                throwIfFound: false,
+                _testOutputHelper,
+                str => Parser.IsLineValid(str, () => $"{values[0]}\r"),
+                str => Parser.IsLineValid(str, () => $"{values[1]}\r"),
+                str => Parser.IsLineValid(str, () => $"{values[2]}\r"),
+                str => Parser.IsLineValid(str, () => $"{values[3]}\r"),
+                str => Parser.IsLineValid(str, () => $"{values[4]}\r"));
+
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 5M, result!.Sources!.Edges!.Single(i => i.Node!.ComponentId == "fileIn").Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 3M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "console_print").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
             });
         }
     }

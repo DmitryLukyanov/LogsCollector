@@ -39,41 +39,20 @@ transforms:
       # send everything to sinks
       .=.
 
+  dedupe_id:
+    type: dedupe
+    inputs: [msg_parser]
+    cache:
+      num_events: 10
+    fields:
+      ignore: 
+        - "timestamp"
+
 sinks:
 
   console_print:
     type: console
     inputs:
-      - "msg_parser"
+      - "dedupe_id"
     encoding:
       codec: "json"
-
-  http:
-    type: "http"
-    method: post
-    inputs:
-      - "msg_parser"
-    uri: ${HTTP_SINK_URI}
-    # tls certificate should be configured for production case
-    tls:
-      verify_certificate: false
-    encoding:
-      codec: "json"
-
-    # auth:
-    #   strategy: "bearer"
-    #   token: "<your_bash_source_token>"
-
-    request:
-      # Vector will retry failed requests (status in [408, 429], >= 500, and != 501).
-      # Other responses will not be retried. You can control the number of retry attempts and backoff rate 
-      # with the request.retry_attempts and request.retry_backoff_secs options.
-      retry_attempts: 3
-
-      # # https://vector.dev/docs/reference/configuration/sinks/http/#request
-      # # Only one request can be outstanding at any given time.
-      # concurrency: none
-
-    # # add if needed later
-    #   headers:
-    #     Source: "some_value"

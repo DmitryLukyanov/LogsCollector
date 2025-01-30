@@ -20,7 +20,9 @@ sources:
     scrape_interval_secs: 150
     tls:
       verify_certificate: false
-
+    query:
+      requestType: 
+        - "cosmosdb"
 transforms:
   msg_parser:
     type: remap

@@ -18,7 +18,7 @@ Write-Host 'Starting flow..'
 # require-healthy: Exit on startup if any sinks fail healthchecks
 
 vector `
-    -c .\config\vector.yaml `
+    --config-dir .\config `
     --require-healthy true `
     --color always `
     --no-graceful-shutdown-limit `

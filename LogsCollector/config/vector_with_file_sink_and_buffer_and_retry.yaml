@@ -10,7 +10,6 @@ acknowledgements:
 data_dir: ./data
 
 sources:
-
   fileIn:
     type: "file"
     glob_minimum_cooldown_ms: 1000
@@ -68,12 +67,16 @@ sinks:
       # Vector will retry failed requests (status in [408, 429], >= 500, and != 501).
       # Other responses will not be retried. You can control the number of retry attempts and backoff rate 
       # with the request.retry_attempts and request.retry_backoff_secs options.
-      retry_attempts: 3
+      retry_attempts: 1
+      timeout_secs: 100
+    buffer:
+      type: disk
+      when_full: block
+      max_size: 268435488  # 256 MBs
 
       # # https://vector.dev/docs/reference/configuration/sinks/http/#request
       # # Only one request can be outstanding at any given time.
-      # concurrency: none
+    concurrency: none
 
-    # # add if needed later
-    #   headers:
-    #     Source: "some_value"
+    headers:
+      waiting: "300"

@@ -18,7 +18,6 @@ namespace LogsTransmitterFunction
     /// * backoff rate with the request.retry_attempts and request.retry_backoff_secs options.
     /// </summary>
 
-    // TODO: move to isolated process flow!
     public class LogsTransmitterFunction(ILogger<LogsTransmitterFunction> logger)
     {
         public record LogBatch

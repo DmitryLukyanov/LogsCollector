@@ -6,16 +6,10 @@ namespace LogsCollector
 {
     internal class Program
     {
-        static int Main(string[] args)
-        {
-            // The function emulator requires some time to be launched
-            // TODO: find a better way
-            Thread.Sleep(TimeSpan.FromSeconds(10));
-
-            return new CakeHost()
+        static int Main(string[] args) => 
+            new CakeHost()
                 .UseContext<LogContext>()
                 .Run(args);
-        }
     }
 
     [TaskName("Default")]
@@ -36,8 +30,7 @@ namespace LogsCollector
                         WorkingDirectory = workingDirectory,
                         BypassExecutionPolicy = true,
                         LogOutput = true,
-                        // Timeout = (int)TimeSpan.FromSeconds(10).TotalMilliseconds,
-                        ExceptionOnScriptError = true
+                        ExceptionOnScriptError = true,
                     })
                     .ToList();
 

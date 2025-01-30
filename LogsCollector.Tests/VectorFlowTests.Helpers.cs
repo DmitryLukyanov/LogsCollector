@@ -43,7 +43,7 @@ namespace LogsCollector.Tests
                 }
             }
 
-            public static async Task InsertRecords(IEnumerable<string> messages, string containerName = ContainerName)
+            public static async Task InsertRecords(IEnumerable<(int Id, string Message)> messages, string containerName = ContainerName)
             {
                 using var client = new CosmosClient(connectionString: __connectionString);
                 await client.CreateDatabaseIfNotExistsAsync(DbName);
@@ -53,7 +53,7 @@ namespace LogsCollector.Tests
 
                 foreach (var message in messages)
                 {
-                    await container.CreateItemAsync(new { id = Guid.NewGuid(), message = message });
+                    await container.CreateItemAsync(new { id = message.Id.ToString(), message = message.Message });
                 }
             }
 
@@ -396,7 +396,6 @@ namespace LogsCollector.Tests
                 };
 
                 using var client = new GraphQLHttpClient(options, new SystemTextJsonSerializer());
-
                 var request = new GraphQLRequest
                 {
                     Query = @"query {

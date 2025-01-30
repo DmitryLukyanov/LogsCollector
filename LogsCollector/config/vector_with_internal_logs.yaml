@@ -1,15 +1,12 @@
 api:
   enabled: true
 
-# Controls if sources will wait for destination sinks to deliver the events,
-# or persist them to a disk buffer, before acknowledging receipt.
-# If set to true, all capable sources will have acknowledgements enabled.
-acknowledgements:
-  enabled: true
-
 data_dir: ./data
 
 sources:
+
+  internal_logs_id:
+    type: internal_logs
 
   fileIn:
     type: "file"
@@ -77,3 +74,19 @@ sinks:
     # # add if needed later
     #   headers:
     #     Source: "some_value"
+
+  file_internal_log_out_json:
+    type: "file"
+    inputs:
+      - "internal_logs_id"
+    path: ./output/output.json
+    encoding:
+      codec: "json"
+
+  file_internal_log_out:
+    type: "file"
+    inputs:
+      - "internal_logs_id"
+    path: ./output/output.txt
+    encoding:
+      codec: "text"
