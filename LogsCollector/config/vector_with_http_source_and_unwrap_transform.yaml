@@ -1,0 +1,44 @@
+api:
+  enabled: true
+
+# NOT SUPPORTED FOR http_client source
+#acknowledgements:
+#  enabled: true
+
+data_dir: ./data
+
+sources:
+
+  http_source:
+    type: http_client
+    endpoint: ${HTTP_SOURCE_URI}
+    headers:
+      Accept:
+        - text/plain
+        - text/html
+    method: GET
+    scrape_interval_secs: 15
+    query:
+      requestType: 
+        - "dummy"
+    tls:
+      verify_certificate: false
+
+transforms:
+  unwrapper_id:
+    type: remap
+    inputs: [http_source]
+    source: |
+      # https://vector.dev/highlights/2021-07-16-remap-multiple/
+      # TODO: add validation
+      .message = parse_json!(.message)
+      . = unnest!(.message)
+
+sinks:
+
+  console_print:
+    type: console
+    inputs:
+      - "unwrapper_id"
+    encoding:
+      codec: "json"

@@ -61,6 +61,12 @@ namespace LogsCollector.Tests
                 __originalConfigDirectory,
                 "vector_with_dedupe_transform.yaml"));
 
+        private static readonly string __originalLogsConfigWithHttpSourceAndUnwrapArrayOfMessages = Path.GetFullPath(
+            Path.Combine(
+                __originalConfigDirectory,
+                "vector_with_http_source_and_unwrap_transform.yaml"));
+
+
         private static readonly string __originalLaunchPs1Path = Path.Combine(__originalProjectDirectory, "Launch.ps1");
         #endregion
 
@@ -128,6 +134,7 @@ namespace LogsCollector.Tests
         [InlineData(4)]
         [InlineData(5)]
         [InlineData(6)]
+        [InlineData(7)]
         public async Task Ensure_config_is_valid(int testCase)
         {
             var config = testCase switch
@@ -142,6 +149,7 @@ namespace LogsCollector.Tests
                     : __originalConfigWithDataDogSink,
                 5 => __originalInternalLogsConfig,
                 6 => __originalLogsConfigWithDedupeTransform,
+                7 => __originalLogsConfigWithHttpSourceAndUnwrapArrayOfMessages,
                 _ => throw new NotImplementedException()
             };
 
@@ -538,7 +546,7 @@ namespace LogsCollector.Tests
 
             AssertStream.AssertOutput(
                 output!,
-                timeout: TimeSpan.FromSeconds(130),
+                timeout: TimeSpan.FromSeconds(30),
                 logTag: "mainAssert",
                 expectedCount: 2,
                 throwIfFound: false,
@@ -767,6 +775,46 @@ namespace LogsCollector.Tests
             {
                 Assert.Equal(expected: 5M, result!.Sources!.Edges!.Single(i => i.Node!.ComponentId == "fileIn").Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
                 Assert.Equal(expected: 3M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "console_print").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
+            });
+        }
+
+        [Fact]
+        public async Task Ensure_multi_event_single_logs_is_unwrapped()
+        {
+            await Cosmos.PrepareCosmos(); // clear test db
+            using var azureFunctionProcess = Powershell.SpawnFunction(__originalAzureFunctionProjectDirectory, _stdError, SinkHttpFunctionPort, waitUntil: "LogsTransmitter: [POST]");
+
+            var functionPortWithHttpSource = 7175;
+            using var httpSourceFunctionProcess = Powershell.SpawnFunction(
+                __originalAzureFunctionHttpSourceProjectDirectory,
+                _stdError,
+                functionPortWithHttpSource,
+                "LogsSource: [GET]");
+
+            FileSystem.RenameFile(__originalLogsConfigWithHttpSourceAndUnwrapArrayOfMessages, _testRunConfig);
+
+            using var process = Powershell.RunPs1Script(
+                @$"-ExecutionPolicy Bypass -File ""{_testRunLaunchPs1}""",
+                workingDirectory: _testRunDirectory,
+                errorStdOutput: _stdError,
+                out var output,
+                out var error,
+                inWindow: false);
+
+            AssertStream.AssertOutput(
+                output!,
+                timeout: TimeSpan.FromSeconds(30),
+                logTag: "mainAssert",
+                expectedCount: 2,
+                throwIfFound: false,
+                _testOutputHelper,
+                str => str.Contains("HttpSource_value:"));
+
+            AssertStream.AssertOutput(error!, "200 OK", TimeSpan.FromSeconds(10), expectedCount: null);
+            await GraphQLHelper.ValidateThroughApi((result) =>
+            {
+                Assert.Equal(expected: 1M, result!.Sources!.Edges!.Single().Node!.Metrics!.SentEventsTotal!.SentEventsTotal);
+                Assert.Equal(expected: 2M, result!.Sinks!.Edges!.Single(i => i.Node!.ComponentId == "console_print").Node!.Metrics!.ReceivedEventsTotal!.ReceivedEventsTotal);
             });
         }
     }

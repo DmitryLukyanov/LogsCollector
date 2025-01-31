@@ -44,7 +44,7 @@ namespace LogsSourceFunction
 
             static string[] GetDummyLogs()
             {
-                string[] responseMessage = [$"HttpSource_value:{Guid.NewGuid()}"];
+                string[] responseMessage = [$"HttpSource_value:{Guid.NewGuid()}", $"HttpSource_value:{Guid.NewGuid()}"];
                 return responseMessage;
             }
 
